@@ -1,0 +1,6 @@
+interface:
+  display_name: "微信消息处理"
+  short_description: "直接读取本机微信私聊、群聊与文件，处理任务并记录成功回执"
+  default_prompt: "使用 $wechat2codex 读取相关微信消息和文件，按我的任务处理。"
+policy:
+  allow_implicit_invocation: true

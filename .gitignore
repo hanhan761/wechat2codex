@@ -1,0 +1,13 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.db
+*.db-*
+*.sqlite*
+keys*.json
+private/
+attachments/
+wechatauto_logs/
+*.whl
+.env
