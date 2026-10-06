@@ -1,0 +1,8 @@
+# Image prompt
+
+Generated with the built-in image_gen tool.
+
+Use case: infographic-diagram. Asset type: a polished landscape GitHub README introduction banner for the repository wechat2codex. Generate a beautiful editorial technology illustration, wide 16:9 composition, crisp readable Simplified Chinese typography and clean rounded cards, spacious white/light mint background, green and charcoal accents. Title exactly: "wechat2codex". Subtitle exactly: "微信里的消息，变成可用的成果". Main visual: a clear left-to-right workflow with three connected stages. Left stage label "微信内容", with illustrated message bubbles, group-avatar cluster and document icons, small text "私聊 · 群消息 · 本地文件". Middle stage label "Codex Skill", showing a desktop computer and elegant processing cards, small text "读取 · 理解 · 处理". Right stage label "任务成果", with illustrated summary page, checklist and spreadsheet, small text "摘要 · 待办 · 数据分析". Footer has two small factual notes: "数据留在本机" and "调用时处理". Use only invented abstract placeholder message lines, no real usernames, private chat content or screenshots. No claim of always-on monitoring, cloud sync, sending messages or all files downloaded. Avoid busy decorations, tiny unreadable text and watermarks. Attractive professional open-source project hero image, informative at GitHub README width.
+
+Final edit:
+Edit this generated wechat2codex README banner. Preserve the layout, illustrations, colors, title and all other text. Change only the small subtitle below the bottom-left shield label 数据留在本机: replace 你的微信数据只在本地处理 with exactly 聊天记录和凭据不提交到仓库. This must not imply the AI model itself runs locally. Keep every other visual unchanged.

@@ -1,5 +1,7 @@
 # wechat2codex
 
+![wechat2codex：将微信私聊、群消息和本地文件转换为摘要、待办与数据分析成果](assets/wechat2codex-intro.png)
+
 让 Codex 在你说“微信”时读取本机微信收到的内容，按你的任务处理。支持私聊、群消息、引用、合并转发，以及本地已有的群文件、图片、语音和视频。
 
 后端采用 [wechatauto-replica](https://github.com/fanyuantaier/wechatauto-replica) 1.2.4.4 的只读数据库与媒体模块。运行于 Windows 桌面微信，不要求手动转发给 Codex。
