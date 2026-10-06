@@ -15,6 +15,8 @@ python scripts/setup.py
 & "$env:LOCALAPPDATA/wechat2codex/venv/Scripts/python.exe" scripts/wechat.py doctor
 ~~~
 
+同时安装读取与发送 skill 后，“微信skills”（也支持“微信 skills”“微信技能”）是统一入口，可调用全部读取、附件处理、文字和文件发送能力；有具体任务时直接执行对应功能。
+
 在 Codex 新会话中说：
 - “微信，帮我整理某某群今天的讨论和待办。”
 - “微信，把老师发的 Excel 下载下来分析。”
