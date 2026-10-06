@@ -1,0 +1,72 @@
+{
+  "version": "4.1.15.13",
+  "sha256": "10f8e995453e2da46d4f2b5080cd6da1f13cc5147746adc119ceae38cb039de5",
+  "dll_path": "C:/Program Files/Tencent/Weixin/4.1.15.13/Weixin.dll",
+  "rvas": {
+    "text_ctor": "0x766680",
+    "param_builder": "0xf910",
+    "dispatcher": "0x19d0bc0",
+    "invoker": "0x19d1380",
+    "type_getter": "0x766c00",
+    "subtype_getter": "0x766c10",
+    "native_alloc": "0x74ab89c",
+    "native_free": "0x74ab8d8",
+    "text_dtor": "0x7679b0"
+  },
+  "layout": {
+    "wrapper_size": 1960,
+    "receiver": 176,
+    "type": 280,
+    "msg_len": 456,
+    "uuid": 1784,
+    "content": 1880,
+    "atlist": 1912
+  },
+  "param1_vtable": "0x9112308",
+  "outer_vtable": "0x8e534f8",
+  "inner_vtable": "0x8e53588",
+  "counter": "0xb0bc2b0",
+  "runtime_verified": false,
+  "delivery_verified": false,
+  "signatures": {
+    "text_ctor": {
+      "rva": 7759488,
+      "bytes": "5556574883ec50488d6c245048c745f8"
+    },
+    "param_builder": {
+      "rva": 63760,
+      "bytes": "554157415641545657534883ec40488d"
+    },
+    "dispatcher": {
+      "rva": 27069376,
+      "bytes": "5541565657534881ece0010000488dac"
+    },
+    "invoker": {
+      "rva": 27071360,
+      "bytes": "5556574881ecd0000000488dac248000"
+    },
+    "type_getter": {
+      "rva": 7760896,
+      "bytes": "8b8118010000c3cccccccccccccccccc"
+    },
+    "subtype_getter": {
+      "rva": 7760912,
+      "bytes": "8b811c010000c3cccccccccccccccccc"
+    },
+    "native_alloc": {
+      "rva": 122337436,
+      "bytes": "40534883ec20488bd9eb0f488bcbe821"
+    },
+    "native_free": {
+      "rva": 122337496,
+      "bytes": "e98b030700cccccce9f3ffffffcccccc"
+    },
+    "text_dtor": {
+      "rva": 7764400,
+      "bytes": "564883ec204889ce488d05c9bb6e0848"
+    }
+  },
+  "native_submission_verified": false,
+  "server_message_id_observed": false,
+  "foreground_test_passed": false
+}
