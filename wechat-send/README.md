@@ -4,6 +4,20 @@
 
 文件名以UTF-8传递，本地路径以UTF-16传递，微信原生附件任务生成XML并上传。不要把XML当作名称参数。发送按准确会话ID执行，不依赖前台窗口。
 
+## 草稿审核
+
+所有文字、附件及测试发送都先按 [SKILL.md](SKILL.md#强制草拟与人工审核) 展示完整草稿，再等待用户的后续明确批准。scripts/review.py 的 draft-text / draft-file 不连接微信，生成带准确对象、发送账号/PID和内容指纹的 pending_review 草稿；附件提供可打开的私有快照。approve 只能在真实用户看到内容并回复“批准发送 <草稿ID>”后记录该回复。
+
+两个发送器都要求 --draft-id；未批准、内容或对象变化、PID不符及已消费的批准会被拒绝。审核记录在 native 提交前以排他方式消费，失败也不复用。正文按 UTF-8 原始字节读取，保留 CRLF 和尾部空白。草稿与审核记录仅存于受限的 %LOCALAPPDATA%/wechat2codex/private/send/reviews，不提交 GitHub。
+
+CLI 可校验草稿一致性和防止重复提交，无法验证回复的作者；人类审核来自 skill 的对话流程，代理不得生成自己的批准或绕过审核调用 DLL。该流程不改变微信进程在操作系统中的权限。
+
+在仓库根目录运行离线验证（mock 原生调用，不发送真实消息）：
+
+~~~text
+python -m unittest discover -s tests -v
+~~~
+
 ## 重建
 
 需要64位Windows、LLVM clang/lld和Windows SDK的x64 kernel32.lib。C源码使用最小Win32声明和SEH，不依赖MSVC CRT或Visual Studio头文件。

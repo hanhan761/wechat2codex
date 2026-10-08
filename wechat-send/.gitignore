@@ -7,3 +7,5 @@ attempts.jsonl
 **/*.lib
 **/*.exp
 **/*构造测试*
+reviews/
+**/*.used

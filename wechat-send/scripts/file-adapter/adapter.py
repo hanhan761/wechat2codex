@@ -2,6 +2,8 @@
 import argparse,ctypes as C,ctypes.wintypes as W,hashlib,json,os,sys,time,uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent
+sys.path.insert(0,str(ROOT.parent))
+from review import validate_review,claim_review
 PROFILE=json.loads((ROOT/'profile.json').read_text(encoding='utf8'))
 K=C.WinDLL('kernel32',use_last_error=True)
 PTR=C.c_void_p;SIZE=C.c_size_t
@@ -124,7 +126,7 @@ def prepare_file(path):
  return path,size,digest,xml
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('action',choices=['inspect','preflight','probe','send-file']);p.add_argument('--pid',type=int);p.add_argument('--to');p.add_argument('--file',type=Path);p.add_argument('--experimental',action='store_true');a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('action',choices=['inspect','preflight','probe','send-file']);p.add_argument('--pid',type=int);p.add_argument('--to');p.add_argument('--file',type=Path);p.add_argument('--experimental',action='store_true');p.add_argument('--draft-id');a=p.parse_args()
  if C.sizeof(PTR)!=8:raise RuntimeError('64-bit Python required')
  if a.action=='probe':
   path=ROOT/'中文附件构造测试.txt'
@@ -133,6 +135,9 @@ def main():
   if not a.file:raise RuntimeError('Specify --file')
   path=a.file
  if a.action!='inspect':path,size,digest,xml=prepare_file(path)
+ if a.action=='send-file':
+  approved=validate_review(a.draft_id,'file',a.to,pid=a.pid,file=path)
+  a.pid=approved['pid']
  pid,ms,wx=select(a.pid);h=checked(openprocess(0x410 if a.action in ('inspect','preflight') else 0x43a,False,pid))
  try:
   verify(h,wx)
@@ -156,7 +161,8 @@ def main():
    _,snap_size,snap_digest,_=prepare_file(snapshot)
    if snap_size!=size or snap_digest!=digest:raise RuntimeError('File changed while staging; nothing submitted')
    req.path=str(snapshot)
-   attempt={'request_id':str(uuid.uuid4()),'to':a.to,'file_name':path.name,'file_size':size,'file_sha256':digest,'staged_file':str(snapshot),'time':time.time(),'status':'submission_started'}
+   claim_review(a.draft_id,'file',a.to,pid=pid,file=path)
+   attempt={'request_id':str(uuid.uuid4()),'draft_id':a.draft_id,'to':a.to,'file_name':path.name,'file_size':size,'file_sha256':digest,'staged_file':str(snapshot),'time':time.time(),'status':'submission_started'}
    with (ROOT/'attempts.jsonl').open('a',encoding='utf8') as log:log.write(json.dumps(attempt)+'\n')
   result=execute(h,pid,ms,req)
   out={'status':{2:'object_layout_verified',3:'submitted_unconfirmed'}.get(result.status,'native_error'),'code':result.status,'exception':hex(result.exception),'type':result.type,'subtype':result.reserved,'pid':pid,'sha256':PROFILE['sha256'],'message_sent':False if a.action=='probe' else 'unconfirmed','delivery_verified':False}

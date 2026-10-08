@@ -2,6 +2,7 @@
 import argparse,ctypes as C,ctypes.wintypes as W,hashlib,json,os,sys,time,uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent
+from review import validate_review,claim_review
 PROFILE=json.loads((ROOT/'profile.json').read_text(encoding='utf8'))
 K=C.WinDLL('kernel32',use_last_error=True)
 PTR=C.c_void_p;SIZE=C.c_size_t
@@ -111,7 +112,12 @@ def execute(h,pid,ms,request):
  finally:
   if finished:free(h,addr,0,0x8000)
 def main():
- p=argparse.ArgumentParser();p.add_argument('action',choices=['inspect','probe','send']);p.add_argument('--pid',type=int);p.add_argument('--to');p.add_argument('--text');p.add_argument('--text-file',type=Path);p.add_argument('--experimental',action='store_true');a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('action',choices=['inspect','probe','send']);p.add_argument('--pid',type=int);p.add_argument('--to');p.add_argument('--text');p.add_argument('--text-file',type=Path);p.add_argument('--experimental',action='store_true');p.add_argument('--draft-id');a=p.parse_args()
+ if a.action=='send':
+  if not a.to or bool(a.text is not None)==bool(a.text_file is not None):raise RuntimeError('Specify exact --to and exactly one of --text or --text-file')
+  text=a.text if a.text is not None else a.text_file.read_bytes().decode('utf8')
+  approved=validate_review(a.draft_id,'text',a.to,pid=a.pid,raw=text.encode('utf8'))
+  a.pid=approved['pid']
  if C.sizeof(PTR)!=8:raise RuntimeError('64-bit Python required')
  pid,ms,wx=select(a.pid);h=checked(openprocess(0x410 if a.action=='inspect' else 0x43a,False,pid))
  try:
@@ -127,17 +133,18 @@ def main():
    proof=json.loads((ROOT/'runtime-probe.json').read_text())
    if proof.get('pid')!=pid or proof.get('sha256')!=PROFILE['sha256'] or proof.get('status')!='object_layout_verified':raise RuntimeError('Probe does not match the current process')
    if not a.to or bool(a.text is not None)==bool(a.text_file is not None):raise RuntimeError('Specify exact --to and exactly one of --text or --text-file')
-   text=a.text if a.text is not None else a.text_file.read_text(encoding='utf8')
+   text=a.text if a.text is not None else a.text_file.read_bytes().decode('utf8')
    if '\0' in text or '\0' in a.to:raise RuntimeError('NUL is not supported')
    raw=text.encode('utf8');target=a.to.encode('utf8')
    if not 0<len(raw)<3072 or not 0<len(target)<256:raise RuntimeError('UTF-8 text limit 3071 bytes; target limit 255 bytes')
    if any(ord(c)<33 for c in a.to):raise RuntimeError('Use an exact WeChat ID, not a display name')
    req.mode=2;req.receiver=target;req.text=raw
+  if a.action=='send':claim_review(a.draft_id,'text',a.to,pid=pid,raw=raw)
   result=execute(h,pid,ms,req)
   out={'status':{1:'live_addresses_verified',2:'object_layout_verified',3:'submitted_unconfirmed'}.get(result.status,'native_error'),'code':result.status,'exception':hex(result.exception),'pid':pid,'sha256':PROFILE['sha256'],'message_sent':False if a.action=='probe' else 'unconfirmed','delivery_verified':False}
   if result.status==2:(ROOT/'runtime-probe.json').write_text(json.dumps(out,indent=2),encoding='utf8')
   if a.action=='send':
-   out['request_id']=str(uuid.uuid4());out['to']=a.to;out['text_sha256']=hashlib.sha256(raw).hexdigest();out['time']=time.time()
+   out['request_id']=str(uuid.uuid4());out['draft_id']=a.draft_id;out['to']=a.to;out['text_sha256']=hashlib.sha256(raw).hexdigest();out['time']=time.time()
    with (ROOT/'attempts.jsonl').open('a',encoding='utf8') as log:log.write(json.dumps(out)+'\n')
   print(json.dumps(out));
   if result.status not in (1,2,3):sys.exit(1)
