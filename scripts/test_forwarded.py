@@ -266,5 +266,33 @@ class ForwardedTests(unittest.TestCase):
             self.assertEqual(Path(result['source_path']).read_bytes(),original)
             self.assertEqual(Path(result['path']).read_bytes(),jpeg)
 
+
+    def test_regular_file_duplicate_filename_is_recovered_by_digest(self):
+        with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
+            root=Path(td);folder=root/'account'/'msg'/'file'/'2026-10';folder.mkdir(parents=True)
+            blob=b'correct report';digest=hashlib.md5(blob).hexdigest()
+            (folder/'report(1).pptx').write_bytes(blob)
+            (folder/'report(2).pptx').write_bytes(b'wrong contents')
+            xml='<msg><appmsg><type>6</type><title>report.pptx</title><appattach><totallen>'+str(len(blob))+'</totallen><md5>'+digest+'</md5></appattach></appmsg></msg>'
+            result=self._run_media(root,xml)
+            self.assertEqual(result['status'],'available')
+            self.assertEqual(Path(result['path']).name,'report.pptx')
+            self.assertEqual(Path(result['path']).read_bytes(),blob)
+            self.assertEqual(result['matched_by'],'md5')
+
+    def test_regular_file_duplicate_name_with_wrong_digest_is_rejected(self):
+        with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
+            root=Path(td);folder=root/'account'/'msg'/'file'/'2026-10';folder.mkdir(parents=True)
+            blob=b'wrong report';(folder/'report(1).pptx').write_bytes(blob)
+            xml='<msg><appmsg><type>6</type><title>report.pptx</title><appattach><totallen>'+str(len(blob))+'</totallen><md5>'+'b'*32+'</md5></appattach></appmsg></msg>'
+            self.assertEqual(self._run_media(root,xml)['status'],'local_missing')
+
+    def test_regular_file_duplicate_name_without_digest_is_not_guessed(self):
+        with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
+            root=Path(td);folder=root/'account'/'msg'/'file'/'2026-10';folder.mkdir(parents=True)
+            (folder/'report(1).pptx').write_bytes(b'unknown report')
+            xml='<msg><appmsg><type>6</type><title>report.pptx</title><appattach/></appmsg></msg>'
+            self.assertEqual(self._run_media(root,xml)['status'],'local_missing')
+
 if __name__ == '__main__':
     unittest.main()

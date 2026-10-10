@@ -159,10 +159,15 @@ def file_copy(db, chat, row, dest, summary=None):
     name = re.split(r"[/\\]", name)[-1]
     root = pathlib.Path(db.account_dir) / "msg" / "file"
     month = dt.datetime.fromtimestamp(row["create_time"]).strftime("%Y-%m")
-    # Search all local files, but require content evidence or an unambiguous month match.
-    candidates = [p for p in root.rglob("*") if p.is_file() and p.name == name
-                  and p.resolve().is_relative_to(root.resolve())] if root.exists() else []
     expected_md5 = meta.get("md5")
+    digest_known = bool(expected_md5 and re.fullmatch(r"[a-fA-F0-9]{32}", expected_md5))
+    # WeChat appends (1), (2), ... when an already-named file is downloaded.
+    # Accept those aliases only with a full message MD5, never by filename alone.
+    original = pathlib.Path(name)
+    duplicate_name = re.compile(re.escape(original.stem) + r"(?: ?\([1-9][0-9]*\))+" + re.escape(original.suffix) + r"$", re.IGNORECASE)
+    candidates = [p for p in root.rglob("*") if p.is_file()
+                  and (p.name == name or (digest_known and duplicate_name.fullmatch(p.name)))
+                  and p.resolve().is_relative_to(root.resolve())] if root.exists() else []
     size = meta.get("size")
     if size and str(size).isdigit():
         candidates = [p for p in candidates if p.stat().st_size == int(size)]
@@ -179,7 +184,8 @@ def file_copy(db, chat, row, dest, summary=None):
     safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).rstrip(". ")[:140] or "attachment"
     target = dest / safe
     shutil.copy2(candidates[0], target)
-    return {"status": "available", "path": str(target), "sha256": next(iter(hashes))}
+    return {"status": "available", "path": str(target), "sha256": next(iter(hashes)),
+            "source_path": str(candidates[0]), "matched_by": "md5" if digest_known else "month_filename"}
 
 def run(args):
     db, media = open_db(args)
