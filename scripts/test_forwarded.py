@@ -189,5 +189,62 @@ class ForwardedTests(unittest.TestCase):
     def test_plain_text_with_angle_brackets_stays_plain_text(self):
         self.assertEqual(w.xml_summary('R&D < 5')['text'],'R&D < 5')
 
+
+    def test_extensionless_encrypted_record_cache_and_footer_identity(self):
+        from forwarded import recover_forwarded
+        import struct
+        with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
+            root=Path(td);folder=root/'account'/'msg'/'attach'/'chat'/'2026-10'/'Rec'/'record'/'Img';folder.mkdir(parents=True)
+            stream=io.BytesIO();Image.new('RGB',(30,20),'navy').save(stream,'PNG')
+            png=stream.getvalue();blob=png+b'container-footer-24-bytes'
+            digest=hashlib.md5(blob).hexdigest()
+            # This fake V2 body exercises locating and dispatch, not AES itself.
+            header=b'\x07\x08V2\x08\x07'+struct.pack('<LL',16,0)+b'\0'
+            (folder/'1').write_bytes(header+blob[:16]+b'x'*16+blob[16:])
+            original_strip=lambda data:(data[:-24],24)
+            module=types.SimpleNamespace(strip_container_footer=original_strip)
+            class Downloader:
+                def __init__(self,*a,**kw):pass
+                def decrypt_image(self,path):return module.strip_container_footer(blob)[0]
+            module.MediaDownloader=Downloader
+            entries=w.xml_summary(card(record_xml([item(2,'<fullmd5>'+digest+'</fullmd5><datasize>'+str(len(blob))+'</datasize>')])))['forwarded']
+            result=recover_forwarded(types.SimpleNamespace(account_dir=str(root/'account')),module,entries,root/'private',1791611342)['items'][0]
+            self.assertEqual(result['status'],'available')
+            self.assertEqual(result['quality'],'original')
+            self.assertEqual(Path(result['path']).read_bytes(),blob)
+            self.assertIs(module.strip_container_footer,original_strip)
+
+    def test_same_size_encrypted_record_is_rejected_when_digest_differs(self):
+        from forwarded import recover_forwarded
+        import struct
+        with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
+            root=Path(td);folder=root/'account'/'cache';folder.mkdir(parents=True)
+            stream=io.BytesIO();Image.new('RGB',(30,20),'navy').save(stream,'PNG');blob=stream.getvalue()
+            (folder/'1').write_bytes(b'\x07\x08V2\x08\x07'+struct.pack('<LL',16,0)+b'\0'+blob[:16]+b'x'*16+blob[16:])
+            class Downloader:
+                def __init__(self,*a,**kw):pass
+                def decrypt_image(self,path):return blob
+            entries=w.xml_summary(card(record_xml([item(2,'<fullmd5>'+'b'*32+'</fullmd5><datasize>'+str(len(blob))+'</datasize>')])))['forwarded']
+            result=recover_forwarded(types.SimpleNamespace(account_dir=str(root/'account')),types.SimpleNamespace(MediaDownloader=Downloader),entries,root/'private',1791611342)['items'][0]
+            self.assertEqual(result['status'],'local_missing')
+            self.assertNotIn('path',result)
+
+    def test_backend_footer_helper_is_restored_after_decode_error(self):
+        from forwarded import _decrypt_image_bytes
+        original=lambda data:(data,0)
+        module=types.SimpleNamespace(strip_container_footer=original)
+        class Downloader:
+            def decrypt_image(self,path):raise ValueError('decode error')
+        with self.assertRaises(ValueError):_decrypt_image_bytes(Downloader(),module,Path('fixture'))
+        self.assertIs(module.strip_container_footer,original)
+
+    def test_named_image_with_wrong_digest_is_not_accepted(self):
+        with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
+            root=Path(td);folder=root/'account'/'cache';folder.mkdir(parents=True)
+            stream=io.BytesIO();Image.new('RGB',(30,20),'navy').save(stream,'PNG')
+            (folder/('a'*32+'.png')).write_bytes(stream.getvalue())
+            xml=card(record_xml([item(2,'<fullmd5>'+'b'*32+'</fullmd5>')]))
+            self.assertEqual(self._run_media(root,xml,selector='1')['status'],'local_missing')
+
 if __name__ == '__main__':
     unittest.main()

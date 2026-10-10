@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import struct
 import xml.etree.ElementTree as ET
 
 MAX_RECORD_SIZE = 2_000_000
@@ -196,6 +197,46 @@ def _safe_name(value, default):
     return name
 
 
+def _encoded_image_candidate(path, size, sizes):
+    """Match the plaintext length in a V1/V2 header, never the numeric Rec name.
+
+    Forwarded pictures are also stored as Rec/<record>/Img/1 and 1_t, with
+    no .dat extension. V2 adds a 15-byte header and 1..16 AES padding bytes.
+    Length is only a candidate filter; decrypted content MD5 must still match.
+    """
+    if not sizes or size < 22 or not any(16 <= size - value <= 31 for value in sizes):
+        return False
+    try:
+        with path.open('rb') as stream:
+            head = stream.read(15)
+        if head[:6] == b'\x07\x08V2\x08\x07':
+            aes_size, xor_size = struct.unpack_from('<LL', head, 6)
+            aes_block = aes_size + 16 - aes_size % 16
+            if 15 + aes_block + xor_size > size:
+                return False
+            plain_size = size - 15 - (aes_block - aes_size)
+            return plain_size in sizes
+        if head[:6] == b'\x07\x08V1\x08\x07':
+            return size - 22 in sizes
+    except (OSError, struct.error):
+        pass
+    return False
+
+
+def _decrypt_image_bytes(downloader, media_module, path):
+    # Upstream trims small container footers. Forwarded fullmd5/datasize may
+    # describe the bytes INCLUDING that footer, so retain it until hash checking.
+    # The bridge is single-threaded; always restore the backend helper.
+    strip = getattr(media_module,'strip_container_footer',None)
+    if strip is None:
+        return downloader.decrypt_image(str(path))
+    try:
+        media_module.strip_container_footer = lambda data: (data,0)
+        return downloader.decrypt_image(str(path))
+    finally:
+        media_module.strip_container_footer = strip
+
+
 def _recover_one(db, media_module, entry, files, dest, create_time):
     meta = entry['media']
     hashes = {_digest(meta.get(k)) for k in ('md5','file_md5','thumb_md5')} - {None}
@@ -219,23 +260,26 @@ def _recover_one(db, media_module, entry, files, dest, create_time):
             elif named and kind != 'image':
                 # A plaintext file with a known content digest must verify it.
                 continue
-        if named or by_hash or (name_only and not hashes):
-            candidates.append((path,_quality(path,meta,matched_hash)))
+        encrypted_by_size = kind == 'image' and bool(hashes) and _encoded_image_candidate(path,size,sizes)
+        if named or by_hash or encrypted_by_size or (name_only and not hashes):
+            candidates.append((path,_quality(path,meta,matched_hash),encrypted_by_size))
     if not candidates:
         return {'status':'local_missing','reason':'no_verified_local_copy'}
     ranks = {'original':0,'preview':1,'unknown':2,'thumbnail':3}
     candidates.sort(key=lambda value:ranks[value[1]])
     decoded = []
     errors = []
-    for path, quality in candidates:
+    downloader = None
+    for path, quality, encrypted_by_size in candidates:
         try:
             if not path.resolve().is_relative_to(Path(db.account_dir).resolve()):
                 continue
-            if path.suffix.lower() == '.dat':
+            if path.suffix.lower() == '.dat' or encrypted_by_size:
                 if kind != 'image':
                     continue
-                downloader = media_module.MediaDownloader(db,save_dir=str(dest))
-                blob = downloader.decrypt_image(str(path))
+                if downloader is None:
+                    downloader = media_module.MediaDownloader(db,save_dir=str(dest))
+                blob = _decrypt_image_bytes(downloader,media_module,path)
                 if blob[:4] == b'wxgf':
                     blob = downloader._wxgf_to_jpg(blob)
                     if not blob:
@@ -244,6 +288,8 @@ def _recover_one(db, media_module, entry, files, dest, create_time):
                 blob = path.read_bytes()
             if kind == 'image':
                 blob_digest = hashlib.md5(blob).hexdigest()
+                if hashes and blob_digest not in hashes:
+                    continue
                 quality = _quality(path, meta, blob_digest if blob_digest in hashes else None)
                 from PIL import Image
                 with Image.open(io.BytesIO(blob)) as image:
@@ -261,8 +307,8 @@ def _recover_one(db, media_module, entry, files, dest, create_time):
         except Exception as exc:
             errors.append(type(exc).__name__)
     if not decoded:
-        return {'status':'decode_failed' if errors else 'unsupported',
-                'reason':'local_copy_could_not_be_decoded' if errors else 'unsupported_local_media',
+        return {'status':'decode_failed' if errors else 'local_missing',
+                'reason':'local_copy_could_not_be_decoded' if errors else 'no_verified_local_copy',
                 'error_types':sorted(set(errors))}
     best = min(ranks[value[1]] for value in decoded)
     decoded = [value for value in decoded if ranks[value[1]] == best]

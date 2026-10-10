@@ -35,7 +35,7 @@ read 支持 --since UNIX秒、--contains 文本。结果按新到旧排列，lim
 按用户要求摘要、提取任务、分析数据、阅读文档或生成产物；选择对应文档、表格、PDF等 skill 完成后续工作。
 引用在 message.quote，合并转发在 message.forwarded。转发保留逐条发送者、时间、类型和稳定的 item_id；嵌套转发保留层级。查看转发内附件时，先用父消息的 `media --id` 列出全部附件及状态，再用 `--item` 读取指定条目，不要把合并转发当成普通文件，也不要只读卡片摘要。具体字段、状态和本地缓存限制见 [references/forwarded.md](references/forwarded.md)。
 
-media 只读取已经落地的文件/图片/语音/视频。合并转发返回 `status: forwarded` 和逐项状态；这只说明容器已识别，不能据此宣称所有附件可读。`local_missing` 表示未找到经校验的本地副本，需微信先加载该附件；`ambiguous` 表示有冲突副本或分片ID冲突，不能随意选一个；`decode_failed` 表示本地副本存在但解码失败。图片的 `quality: thumbnail/preview/unknown` 不可称为原图。未解析或截断的嵌套记录必须说明范围，不能声称读完全部转发。
+media 只读取已经落地的文件/图片/语音/视频。合并转发返回 `status: forwarded` 和逐项状态；这只说明容器已识别，不能据此宣称所有附件可读。`local_missing` 表示未找到经校验的本地副本，先按转发参考文档尝试在微信中加载再复查，不要直接要求用户手动打开；`ambiguous` 表示有冲突副本或分片ID冲突，不能随意选一个；`decode_failed` 表示本地副本存在但解码失败。图片的 `quality: thumbnail/preview/unknown` 不可称为原图。未解析或截断的嵌套记录必须说明范围，不能声称读完全部转发。
 处理成功且产物已验证才 ack。读取不等于处理；--pending 排除已成功处理的记录。失败不 ack。
 
 ## 强制草拟与人工审核
@@ -62,7 +62,7 @@ scripts/send/review.py approve --draft-id <草稿ID> --response "批准发送 <�
 ## 范围与凭据
 
 运行数据、解密副本、读取密钥、附件、草稿、审核记录和回执位于 %LOCALAPPDATA%/wechat2codex/private，脚本会限制该目录 Windows ACL。禁止把这些内容提交到仓库或输出密钥。
-读取后端只加载上游 db/media 模块，不导入其顶层 GUI/发送接口，不触发微信界面下载。发送使用本 skill 的独立原生组件，不点击界面或模拟按键。doctor 为 partial 时明确部分数据库不可读取。
+读取后端只加载上游 db/media 模块，不导入其顶层 GUI/发送接口。缓存缺失时由智能体使用可用的 computer-use 技能，只读定位并打开对应转发图片后复查；读取脚本本身不操作微信界面。发送使用本 skill 的独立原生组件，不点击界面或模拟按键。doctor 为 partial 时明确部分数据库不可读取。
 这是被调用时执行的 skill，并非无人值守消息订阅服务；不能承诺 Codex 未运行时也会自动处理。
 后端来源、安装和限制见 references/backend.md。
 
