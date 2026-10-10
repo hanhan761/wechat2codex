@@ -1,7 +1,8 @@
 """Read-only local WeChat bridge. All runtime data lives outside this repository."""
-import argparse, contextlib, datetime as dt, hashlib, html, importlib, importlib.metadata
+import argparse, contextlib, datetime as dt, hashlib, importlib, importlib.metadata
 import io, json, logging, os, pathlib, re, shutil, sqlite3, subprocess, sys, types
 import xml.etree.ElementTree as ET
+from forwarded import parse_record, recover_forwarded
 
 VERSION = "1.2.4.4"
 BASE = pathlib.Path(os.environ.get("LOCALAPPDATA", str(pathlib.Path.home() / "AppData" / "Local"))) / "wechat2codex"
@@ -73,16 +74,18 @@ def xml_summary(content):
     if not isinstance(content, str):
         return {"text": ""}
     if len(content) > 2_000_000:
-        return {"text": content[:10000], "truncated": True}
+        return {"text": "" if "<appmsg" in content else content[:10000], "truncated": True}
     pos = content.find("<")
     if pos < 0:
         return {"text": content}
     raw = content[pos:]
     if "<!DOCTYPE" in raw.upper() or "<!ENTITY" in raw.upper():
-        return {"text": content[:10000], "xml_rejected": True}
+        return {"text": "", "xml_rejected": True}
     try:
         root = ET.fromstring(raw)
     except ET.ParseError:
+        if "<appmsg" in raw or raw.lstrip().startswith(("<msg", "<?xml")):
+            return {"text": "", "xml_status": "unparsed"}
         return {"text": content}
     app = root if root.tag == "appmsg" else root.find(".//appmsg")
     if app is None:
@@ -99,16 +102,10 @@ def xml_summary(content):
         out["quote"]["content"] = out["quote"]["content"][:10000]
     record = app.findtext("recorditem")
     if record:
-        try:
-            record = html.unescape(record)
-            if "<!DOCTYPE" in record.upper() or "<!ENTITY" in record.upper():
-                raise ET.ParseError()
-            rr = ET.fromstring(record)
-            out["forwarded"] = [{k: item.findtext(k) or "" for k in
-                                 ("sourcename", "sourcetime", "datadesc", "datatitle")}
-                                for item in rr.findall(".//dataitem")[:100]]
-        except ET.ParseError:
-            out["forwarded_status"] = "unparsed"
+        parsed = parse_record(record)
+        out["forwarded_status"] = parsed["status"]
+        if parsed["status"] in ("parsed", "truncated"):
+            out["forwarded"] = parsed["items"]
     attach = app.find("appattach")
     if attach is not None and out["app_type"] == "6":
         out["attachment"] = {"name": out["title"], "size": attach.findtext("totallen"),
@@ -120,10 +117,15 @@ def identity(account, chat, row):
               str(row.get("create_time")), str(row.get("type", row.get("local_type")))]
     return hashlib.sha256("\0".join(values).encode()).hexdigest()
 
+@contextlib.contextmanager
 def ledger():
     con = sqlite3.connect(PRIVATE / "receipts.sqlite3")
-    con.execute("CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, chat TEXT, payload TEXT, processed TEXT, result TEXT)")
-    return con
+    try:
+        con.execute("CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, chat TEXT, payload TEXT, processed TEXT, result TEXT)")
+        with con:
+            yield con
+    finally:
+        con.close()
 
 def chat_info(db, session):
     user = session["username"]
@@ -218,7 +220,7 @@ def run(args):
                         "time":row["create_time"],"type":row.get("type"),
                         "sender":sender,"sender_name":db.get_nickname(sender) if sender else None,
                         "message":normalized,"processed":bool(previous and previous[0])}
-                con.execute("INSERT OR IGNORE INTO seen(id,chat,payload) VALUES(?,?,?)",
+                con.execute("INSERT INTO seen(id,chat,payload) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
                             (mid,chat,json.dumps(item,ensure_ascii=False)))
                 output.append(item)
         return {"chat":chat,"messages":output,"limit":args.limit,"offset":args.offset,
@@ -240,7 +242,29 @@ def run(args):
         dest = PRIVATE / "attachments" / args.id
         base_type = int(row["local_type"]) & 0xFFFFFFFF
         if base_type == 49:
-            return file_copy(db,chat,row,dest,payload["message"])
+            # Decode the exact collision-checked source row, including old receipts
+            # written before forwarded attachment metadata was supported.
+            content = row.get("content") or ""
+            if isinstance(content, bytes):
+                content = db._friendly_content(content, "文件/链接/卡片")
+            compressed = row.get("compress_content")
+            if "<" not in content and isinstance(compressed, bytes):
+                content = db._friendly_content(compressed, "文件/链接/卡片")
+            summary = xml_summary(content)
+            if summary.get("app_type") == "19" or "forwarded_status" in summary:
+                if summary.get("forwarded_status") not in ("parsed", "truncated"):
+                    return {"status":"unparsed", "reason":"forwarded_record_could_not_be_parsed"}
+                with hidden_children(), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    result = recover_forwarded(db, media, summary.get("forwarded", []),
+                                               dest / "forwarded", row["create_time"], getattr(args, "item", None))
+                result["parent_message_id"] = args.id
+                result["record_status"] = summary["forwarded_status"]
+                return result
+            if getattr(args, "item", None):
+                return {"status":"invalid_item", "reason":"item_selector_requires_forwarded_record"}
+            return file_copy(db,chat,row,dest,summary)
+        if getattr(args, "item", None):
+            return {"status":"invalid_item", "reason":"item_selector_requires_forwarded_record"}
         dest.mkdir(parents=True,exist_ok=True)
         downloader = media.MediaDownloader(db,save_dir=str(dest))
         with hidden_children(), contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
@@ -261,6 +285,7 @@ def run(args):
     raise ValueError("Unknown command")
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--account")
     parser.add_argument("--db-root")
@@ -279,6 +304,7 @@ def main():
     read.add_argument("--pending",action="store_true")
     media = sub.add_parser("media")
     media.add_argument("--id",required=True)
+    media.add_argument("--item",help="Forwarded item ID from read, e.g. 2 or 1.3")
     ack = sub.add_parser("ack")
     ack.add_argument("--id",required=True,action="append")
     ack.add_argument("--result",required=True)
