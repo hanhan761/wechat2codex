@@ -271,6 +271,7 @@ def _recover_one(db, media_module, entry, files, dest, create_time):
     errors = []
     downloader = None
     for path, quality, encrypted_by_size in candidates:
+        conversion_info = {}
         try:
             if not path.resolve().is_relative_to(Path(db.account_dir).resolve()):
                 continue
@@ -280,10 +281,6 @@ def _recover_one(db, media_module, entry, files, dest, create_time):
                 if downloader is None:
                     downloader = media_module.MediaDownloader(db,save_dir=str(dest))
                 blob = _decrypt_image_bytes(downloader,media_module,path)
-                if blob[:4] == b'wxgf':
-                    blob = downloader._wxgf_to_jpg(blob)
-                    if not blob:
-                        raise ValueError('unsupported_local_image_codec')
             else:
                 blob = path.read_bytes()
             if kind == 'image':
@@ -291,6 +288,15 @@ def _recover_one(db, media_module, entry, files, dest, create_time):
                 if hashes and blob_digest not in hashes:
                     continue
                 quality = _quality(path, meta, blob_digest if blob_digest in hashes else None)
+                if blob[:4] == b'wxgf':
+                    if downloader is None:
+                        downloader = media_module.MediaDownloader(db,save_dir=str(dest))
+                    conversion_info = {'conversion':'wxgf_to_jpg','source_quality':quality,
+                                       'source_sha256':hashlib.sha256(blob).hexdigest(),'_source_blob':blob}
+                    blob = downloader._wxgf_to_jpg(blob)
+                    if not blob:
+                        raise ValueError('unsupported_local_image_codec')
+                    quality = 'preview'
                 from PIL import Image
                 with Image.open(io.BytesIO(blob)) as image:
                     dimensions = list(image.size)
@@ -303,7 +309,7 @@ def _recover_one(db, media_module, entry, files, dest, create_time):
                 dimensions = None
                 extension = path.suffix.lstrip('.') or meta.get('extension') or 'bin'
                 extension = re.sub(r'[^a-zA-Z0-9]', '', str(extension))[:12] or 'bin'
-            decoded.append((blob,quality,extension,dimensions))
+            decoded.append((blob,quality,extension,dimensions,conversion_info))
         except Exception as exc:
             errors.append(type(exc).__name__)
     if not decoded:
@@ -315,7 +321,7 @@ def _recover_one(db, media_module, entry, files, dest, create_time):
     digests = {hashlib.sha256(value[0]).hexdigest() for value in decoded}
     if len(digests) != 1:
         return {'status':'ambiguous','reason':'different_local_copies_match'}
-    blob,quality,extension,dimensions = decoded[0]
+    blob,quality,extension,dimensions,conversion_info = decoded[0]
     dest.mkdir(parents=True,exist_ok=True)
     target = dest / _safe_name(meta.get('name'), 'attachment.'+extension)
     target.write_bytes(blob)
@@ -323,6 +329,10 @@ def _recover_one(db, media_module, entry, files, dest, create_time):
               'bytes':len(blob),'kind':kind}
     if kind == 'image':
         result.update(quality=quality,dimensions=dimensions)
+        if conversion_info:
+            original = target.with_suffix('.wxgf')
+            original.write_bytes(conversion_info.pop('_source_blob'))
+            result.update(conversion_info,source_path=str(original.resolve()))
     return result
 
 

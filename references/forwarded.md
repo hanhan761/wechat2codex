@@ -30,7 +30,7 @@ scripts/wechat.py media --id <父消息id> --item 1.3
 
 原始消息 local_id、sort_seq、时间及类型要通过冲突检查。已读取的旧记录可直接使用 media：入口重新解码准确源行；再次 read 会更新结构化内容而保留处理回执。
 
-图片保持真实字节；本地微信加密 .dat 及 Rec/<记录>/Img/<数字>、<数字>_t 无扩展名缓存使用固定后端解码。V1/V2 头部长度与 AES 填充仅用于筛选候选，最终必须核对解密后内容 MD5，不按数字文件名或大小猜配。转发 fullmd5 可能包含原始容器尾部，校验前保留这些字节，不能因后端裁掉尾部而把原图误报为缺失。quality 区分 original、preview、thumbnail、unknown。完整内容哈希验证通过才标记 original；无法证明完整原图时不能当作原图报告。保留图像尺寸和 SHA256。读取脚本不请求 CDN，也不自行操作界面。
+图片保持真实字节；本地微信加密 .dat 及 Rec/<记录>/Img/<数字>、<数字>_t 无扩展名缓存使用固定后端解码。V1/V2 头部长度与 AES 填充仅用于筛选候选，最终必须核对解密后内容 MD5，不按数字文件名或大小猜配。转发 fullmd5 可能包含原始容器尾部，校验前保留这些字节，不能因后端裁掉尾部而把原图误报为缺失。quality 区分 original、preview、thumbnail、unknown。完整内容哈希验证通过才标记 original；无法证明完整原图时不能当作原图报告。保留图像尺寸和 SHA256。wxgf 容器先校验原始内容再转 JPEG 预览，保留独立 source_path、source_sha256、source_quality 与 conversion；预览 quality 不标原图。读取脚本不请求 CDN，也不自行操作界面。
 
 ## 缓存缺失时的智能体恢复流程
 

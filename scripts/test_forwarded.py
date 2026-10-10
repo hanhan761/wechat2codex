@@ -246,5 +246,25 @@ class ForwardedTests(unittest.TestCase):
             xml=card(record_xml([item(2,'<fullmd5>'+'b'*32+'</fullmd5>')]))
             self.assertEqual(self._run_media(root,xml,selector='1')['status'],'local_missing')
 
+
+    def test_wxgf_identity_is_verified_before_preview_conversion(self):
+        from forwarded import recover_forwarded
+        with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
+            root=Path(td);folder=root/'account'/'cache';folder.mkdir(parents=True)
+            original=b'wxgf-original-container';digest=hashlib.md5(original).hexdigest()
+            (folder/('a'*32+'.dat')).write_bytes(original)
+            stream=io.BytesIO();Image.new('RGB',(30,20),'navy').save(stream,'JPEG');jpeg=stream.getvalue()
+            class Downloader:
+                def __init__(self,*a,**kw):pass
+                def decrypt_image(self,path):return original
+                def _wxgf_to_jpg(self,blob):return jpeg
+            entries=w.xml_summary(card(record_xml([item(2,'<fullmd5>'+digest+'</fullmd5>')])))['forwarded']
+            result=recover_forwarded(types.SimpleNamespace(account_dir=str(root/'account')),types.SimpleNamespace(MediaDownloader=Downloader),entries,root/'private',1791611342)['items'][0]
+            self.assertEqual(result['status'],'available')
+            self.assertEqual(result['quality'],'preview')
+            self.assertEqual(result['source_quality'],'original')
+            self.assertEqual(Path(result['source_path']).read_bytes(),original)
+            self.assertEqual(Path(result['path']).read_bytes(),jpeg)
+
 if __name__ == '__main__':
     unittest.main()
