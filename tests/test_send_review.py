@@ -149,7 +149,14 @@ class AdapterGateTests(ReviewFixture):
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(sys, 'argv', ['adapter.py'] + args))
             stack.enter_context(patch.object(module, 'ROOT', native_root))
-            selected = stack.enter_context(patch.object(module, 'select', return_value=(321, [], {})))
+            selected = stack.enter_context(patch.object(module, 'select', return_value=(321, [], {'path': 'fixture.dll'})))
+            profile = dict(module.PROFILE, version='fixture', _helper_sha256='fixture')
+            stack.enter_context(patch.object(module, 'select_profile', return_value=(profile, native_root / 'fixture.dll')))
+            stack.enter_context(patch.object(module, 'runtime_directory', return_value=native_root))
+            stack.enter_context(patch.object(module, 'process_created', return_value='1.0'))
+            stack.enter_context(patch.object(module, 'require_probe'))
+            stack.enter_context(patch.object(module, 'require_sender_account'))
+            stack.enter_context(patch.object(module, 'protect_private'))
             for function, value in [('openprocess', 1), ('verify', None), ('close', None)]:
                 stack.enter_context(patch.object(module, function, return_value=value))
             result = SimpleNamespace(status=3, exception=0, type=49, reserved=6)

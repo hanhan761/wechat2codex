@@ -85,7 +85,7 @@ def parse_record(value, prefix='', depth=0, budget=None):
         return {'items':[], 'status':'rejected'}
     except ET.ParseError:
         return {'items':[], 'status':'unparsed'}
-    listing = root if root.tag == 'datalist' else root.find('datalist')
+    listing = root if root.tag == 'datalist' else root.find('.//datalist')
     if listing is None:
         return {'items':[], 'status':'unparsed'}
     result = []
@@ -104,6 +104,8 @@ def parse_record(value, prefix='', depth=0, budget=None):
         if kind in ('image','file','voice','video'):
             entry['media'] = _meta(node, kind)
         nested = node.find('recordinfo')
+        if nested is None:
+            nested = node.find('datalist')
         nested_value = nested if nested is not None else node.findtext('recorditem')
         if nested_value is None and kind == 'forwarded' and '<' in entry['datadesc']:
             nested_value = entry['datadesc']
@@ -283,6 +285,8 @@ def _recover_one(db, media_module, entry, files, dest, create_time):
                 blob = _decrypt_image_bytes(downloader,media_module,path)
             else:
                 blob = path.read_bytes()
+            if kind != 'image' and hashes and hashlib.md5(blob).hexdigest() not in hashes:
+                continue
             if kind == 'image':
                 blob_digest = hashlib.md5(blob).hexdigest()
                 if hashes and blob_digest not in hashes:
@@ -307,9 +311,9 @@ def _recover_one(db, media_module, entry, files, dest, create_time):
                     raise ValueError('unsupported_local_image_format')
             else:
                 dimensions = None
-                extension = path.suffix.lstrip('.') or meta.get('extension') or 'bin'
+                extension = meta.get('extension') or path.suffix.lstrip('.') or 'bin'
                 extension = re.sub(r'[^a-zA-Z0-9]', '', str(extension))[:12] or 'bin'
-            decoded.append((blob,quality,extension,dimensions,conversion_info))
+            decoded.append((blob,quality,extension,dimensions,conversion_info,path))
         except Exception as exc:
             errors.append(type(exc).__name__)
     if not decoded:
@@ -321,12 +325,14 @@ def _recover_one(db, media_module, entry, files, dest, create_time):
     digests = {hashlib.sha256(value[0]).hexdigest() for value in decoded}
     if len(digests) != 1:
         return {'status':'ambiguous','reason':'different_local_copies_match'}
-    blob,quality,extension,dimensions,conversion_info = decoded[0]
+    blob,quality,extension,dimensions,conversion_info,path = decoded[0]
     dest.mkdir(parents=True,exist_ok=True)
     target = dest / _safe_name(meta.get('name'), 'attachment.'+extension)
     target.write_bytes(blob)
     result = {'status':'available','path':str(target.resolve()),'sha256':next(iter(digests)),
-              'bytes':len(blob),'kind':kind}
+              'bytes':len(blob),'kind':kind,
+              'source_path':str(path.resolve()),
+              'matched_by':'md5' if hashes else 'local_identity'}
     if kind == 'image':
         result.update(quality=quality,dimensions=dimensions)
         if conversion_info:

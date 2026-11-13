@@ -2,8 +2,10 @@
 import argparse,ctypes as C,ctypes.wintypes as W,hashlib,json,os,sys,time,uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent
-from review import validate_review,claim_review
+from review import validate_review,claim_review,protect_private
+from native_profiles import select_profile,runtime_directory,require_probe,probe_state,error_output,PRIVATE,process_created,require_sender_account,begin_probe,write_probe
 PROFILE=json.loads((ROOT/'profile.json').read_text(encoding='utf8'))
+NATIVE_DLL=ROOT/'wechat-send.dll'
 K=C.WinDLL('kernel32',use_last_error=True)
 PTR=C.c_void_p;SIZE=C.c_size_t
 class Module(C.Structure):
@@ -68,8 +70,13 @@ def verify(h,wx):
  for name,sig in PROFILE['signatures'].items():
   expected=bytes.fromhex(sig['bytes'])
   if rpm(h,wx['base']+sig['rva'],len(expected))!=expected:raise RuntimeError('Live signature mismatch: '+name)
- for r,target in [(0x8e534f8,0xaee0),(0x8e53590,0x766c00),(0x9112318,0x19d0bc0),(0x91123f8,0x19d1380)]:
-  if int.from_bytes(rpm(h,wx['base']+r,8),'little')!=wx['base']+target:raise RuntimeError('Live vtable mismatch: '+hex(r))
+ if PROFILE.get('pointer_checks'):
+  for check in PROFILE['pointer_checks']:
+   r,target=check['rva'],check['target']
+   if int.from_bytes(rpm(h,wx['base']+r,8),'little')!=wx['base']+target:raise RuntimeError('Live vtable mismatch: '+hex(r))
+ else:
+  for r,target in [(0x8e534f8,0xaee0),(0x8e53590,0x766c00),(0x9112318,0x19d0bc0),(0x91123f8,0x19d1380)]:
+   if int.from_bytes(rpm(h,wx['base']+r,8),'little')!=wx['base']+target:raise RuntimeError('Live vtable mismatch: '+hex(r))
 def remote_call(h,fn,param):
  t=checked(thread(h,None,0,fn,param,0,None))
  try:
@@ -93,7 +100,7 @@ def remote_system_function(name,ms):
  remote=next(m for m in ms if m['name'].lower()==Path(path.value).name.lower())
  return remote['base']+fn-owner.value
 def execute(h,pid,ms,request):
- dll=ROOT/'wechat-send.dll'
+ dll=NATIVE_DLL
  local=C.WinDLL(str(dll));rva=C.cast(local.AdapterExecute,PTR).value-local._handle
  current=next((m for m in ms if Path(m['path']).resolve()==dll.resolve()),None)
  if not current:
@@ -112,6 +119,7 @@ def execute(h,pid,ms,request):
  finally:
   if finished:free(h,addr,0,0x8000)
 def main():
+ global PROFILE,NATIVE_DLL
  p=argparse.ArgumentParser();p.add_argument('action',choices=['inspect','probe','send']);p.add_argument('--pid',type=int);p.add_argument('--to');p.add_argument('--text');p.add_argument('--text-file',type=Path);p.add_argument('--experimental',action='store_true');p.add_argument('--draft-id');a=p.parse_args()
  if a.action=='send':
   if not a.to or bool(a.text is not None)==bool(a.text_file is not None):raise RuntimeError('Specify exact --to and exactly one of --text or --text-file')
@@ -119,19 +127,25 @@ def main():
   approved=validate_review(a.draft_id,'text',a.to,pid=a.pid,raw=text.encode('utf8'))
   a.pid=approved['pid']
  if C.sizeof(PTR)!=8:raise RuntimeError('64-bit Python required')
- pid,ms,wx=select(a.pid);h=checked(openprocess(0x410 if a.action=='inspect' else 0x43a,False,pid))
+ pid,ms,wx=select(a.pid)
+ PROFILE,NATIVE_DLL=select_profile(wx['path'],'text')
+ runtime=runtime_directory(PROFILE,'text')
+ h=checked(openprocess(0x410 if a.action in ('inspect','preflight') else 0x43a,False,pid))
  try:
+  PROFILE['_process_created']=process_created(pid)
   verify(h,wx)
+  if a.action not in ('inspect','preflight'):
+   protect_private();runtime.mkdir(parents=True,exist_ok=True)
   if a.action=='inspect':
-   print(json.dumps({'status':'live_addresses_verified','pid':pid,'version':PROFILE['version'],'sha256':PROFILE['sha256'],'dll_loaded':any(m['name'].lower()=='wechat-send.dll' for m in ms),'message_sent':False}));return
+   print(json.dumps({'status':'live_addresses_verified','pid':pid,'version':PROFILE['version'],'sha256':PROFILE['sha256'],'native_sha256':PROFILE['_helper_sha256'],'process_created':PROFILE['_process_created'],'probe_status':probe_state(runtime,pid,PROFILE),'dll_loaded':any(Path(m['path']).resolve()==NATIVE_DLL.resolve() for m in ms),'message_sent':False}));return
   req=Request();req.size=C.sizeof(req)
   if a.action=='probe':
    req.mode=1;req.receiver=b'filehelper';req.text=b'layout probe - never submitted'
   else:
    if not a.experimental:raise RuntimeError('Experimental sender requires --experimental; delivery has not been verified')
-   if not (ROOT/'runtime-probe.json').exists():raise RuntimeError('Run probe before any submission')
-   proof=json.loads((ROOT/'runtime-probe.json').read_text())
-   if proof.get('pid')!=pid or proof.get('sha256')!=PROFILE['sha256'] or proof.get('status')!='object_layout_verified':raise RuntimeError('Probe does not match the current process')
+   if not (runtime/'runtime-probe.json').exists():raise RuntimeError('Run probe before any submission')
+   proof=json.loads((runtime/'runtime-probe.json').read_text())
+   require_probe(proof,pid,PROFILE)
    if not a.to or bool(a.text is not None)==bool(a.text_file is not None):raise RuntimeError('Specify exact --to and exactly one of --text or --text-file')
    text=a.text if a.text is not None else a.text_file.read_bytes().decode('utf8')
    if '\0' in text or '\0' in a.to:raise RuntimeError('NUL is not supported')
@@ -139,16 +153,19 @@ def main():
    if not 0<len(raw)<3072 or not 0<len(target)<256:raise RuntimeError('UTF-8 text limit 3071 bytes; target limit 255 bytes')
    if any(ord(c)<33 for c in a.to):raise RuntimeError('Use an exact WeChat ID, not a display name')
    req.mode=2;req.receiver=target;req.text=raw
-  if a.action=='send':claim_review(a.draft_id,'text',a.to,pid=pid,raw=raw)
+  if a.action=='send':
+   require_sender_account(pid,approved['account'],PROFILE['_process_created'])
+   claim_review(a.draft_id,'text',a.to,pid=pid,raw=raw)
+  if a.action=='probe':begin_probe(runtime,pid,PROFILE)
   result=execute(h,pid,ms,req)
-  out={'status':{1:'live_addresses_verified',2:'object_layout_verified',3:'submitted_unconfirmed'}.get(result.status,'native_error'),'code':result.status,'exception':hex(result.exception),'pid':pid,'sha256':PROFILE['sha256'],'message_sent':False if a.action=='probe' else 'unconfirmed','delivery_verified':False}
-  if result.status==2:(ROOT/'runtime-probe.json').write_text(json.dumps(out,indent=2),encoding='utf8')
+  out={'status':{1:'live_addresses_verified',2:'object_layout_verified',3:'submitted_unconfirmed'}.get(result.status,'native_error'),'code':result.status,'exception':hex(result.exception),'pid':pid,'version':PROFILE['version'],'sha256':PROFILE['sha256'],'native_sha256':PROFILE['_helper_sha256'],'process_created':PROFILE['_process_created'],'message_sent':False if a.action=='probe' else 'unconfirmed','delivery_verified':False}
+  if a.action=='probe':write_probe(runtime,out)
   if a.action=='send':
    out['request_id']=str(uuid.uuid4());out['draft_id']=a.draft_id;out['to']=a.to;out['text_sha256']=hashlib.sha256(raw).hexdigest();out['time']=time.time()
-   with (ROOT/'attempts.jsonl').open('a',encoding='utf8') as log:log.write(json.dumps(out)+'\n')
+   with (runtime/'attempts.jsonl').open('a',encoding='utf8') as log:log.write(json.dumps(out)+'\n')
   print(json.dumps(out));
   if result.status not in (1,2,3):sys.exit(1)
  finally:close(h)
 if __name__=='__main__':
  try:main()
- except Exception as e:print(json.dumps({'status':'error','error':str(e)},ensure_ascii=False));sys.exit(1)
+ except Exception as e:print(json.dumps(error_output(e),ensure_ascii=False));sys.exit(1)

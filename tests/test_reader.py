@@ -5,7 +5,7 @@ reader = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reader)
 class ReaderTests(unittest.TestCase):
     def test_quote_and_forward(self):
-        x = '<msg><appmsg><type>57</type><title>reply</title><refermsg><displayname>A</displayname><content>hello</content></refermsg><recorditem>&lt;recordinfo&gt;&lt;dataitem&gt;&lt;sourcename&gt;B&lt;/sourcename&gt;&lt;datadesc&gt;task&lt;/datadesc&gt;&lt;/dataitem&gt;&lt;/recordinfo&gt;</recorditem></appmsg></msg>'
+        x = '<msg><appmsg><type>57</type><title>reply</title><refermsg><displayname>A</displayname><content>hello</content></refermsg><recorditem>&lt;recordinfo&gt;&lt;datalist&gt;&lt;dataitem&gt;&lt;sourcename&gt;B&lt;/sourcename&gt;&lt;datadesc&gt;task&lt;/datadesc&gt;&lt;/dataitem&gt;&lt;/datalist&gt;&lt;/recordinfo&gt;</recorditem></appmsg></msg>'
         out = reader.xml_summary(x)
         self.assertEqual(out["quote"]["content"],"hello")
         self.assertEqual(out["forwarded"][0]["datadesc"],"task")

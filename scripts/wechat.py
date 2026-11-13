@@ -187,6 +187,21 @@ def file_copy(db, chat, row, dest, summary=None):
     return {"status": "available", "path": str(target), "sha256": next(iter(hashes)),
             "source_path": str(candidates[0]), "matched_by": "md5" if digest_known else "month_filename"}
 
+def native_send_health():
+    """Read-only send capability diagnostics; never constructs or submits messages."""
+    output = {}
+    for kind, relative in (("text", "adapter.py"), ("file", "file-adapter/adapter.py")):
+        adapter = pathlib.Path(__file__).resolve().parent / "send" / relative
+        try:
+            result = subprocess.run([sys.executable, "-X", "utf8", str(adapter), "inspect"],
+                                    capture_output=True, text=True, timeout=20,
+                                    creationflags=subprocess.CREATE_NO_WINDOW)
+            output[kind] = json.loads(result.stdout)
+        except (OSError, subprocess.TimeoutExpired, ValueError) as error:
+            output[kind] = {"status": "unavailable", "error_type": type(error).__name__,
+                            "message_sent": False}
+    return output
+
 def run(args):
     db, media = open_db(args)
     if args.command == "doctor":
@@ -196,7 +211,7 @@ def run(args):
                 "unreadable_database_count": len(db.unkeyed),
                 "sessions_checked": len(sessions),
                 "groups_checked": sum(s["username"].endswith("@chatroom") for s in sessions),
-                "private_directory": str(PRIVATE)}
+                "private_directory": str(PRIVATE), "sending": native_send_health()}
     if args.command == "chats":
         rows = [chat_info(db,s) for s in db.get_sessions(limit=args.limit)]
         if args.groups:
@@ -231,7 +246,7 @@ def run(args):
                 output.append(item)
         return {"chat":chat,"messages":output,"limit":args.limit,"offset":args.offset,
                 "note":"Newest first; use offset for older pages. Reading does not mark processed."}
-    if args.command == "media":
+    if args.command in ("media", "record"):
         with ledger() as con:
             observed = con.execute("SELECT chat,payload FROM seen WHERE id=?",(args.id,)).fetchone()
         if not observed:
@@ -240,10 +255,15 @@ def run(args):
         if payload.get("account") != db.account:
             raise ValueError("Receipt belongs to another account")
         rows = db.get_message_rows_for_media(chat,payload["local_id"])
-        # Upstream media lookup uses local_id; reject shard collisions instead of guessing.
-        unique = {(r["sort_seq"],r["create_time"],r["local_type"]) for r in rows}
-        if len(unique) != 1 or not rows or rows[0]["sort_seq"] != payload["sort_seq"]:
-            return {"status":"ambiguous","reason":"local_id collision or changed message"}
+        # local_id repeats across shards. Match the observed timestamp and sort
+        # sequence before testing uniqueness; never choose a row by local_id alone.
+        rows = [r for r in rows if r.get("sort_seq") == payload.get("sort_seq")
+                and r.get("create_time") == payload.get("time")]
+        unique = {(r.get("sort_seq"), r.get("create_time"), r.get("local_type"),
+                   hashlib.sha256(repr((r.get("content"), r.get("compress_content"))).encode()).hexdigest())
+                  for r in rows}
+        if len(unique) != 1 or not rows:
+            return {"status":"ambiguous","reason":"exact message identity missing or conflicting"}
         row = rows[0]
         dest = PRIVATE / "attachments" / args.id
         base_type = int(row["local_type"]) & 0xFFFFFFFF
@@ -265,6 +285,13 @@ def run(args):
                                                dest / "forwarded", row["create_time"], getattr(args, "item", None))
                 result["parent_message_id"] = args.id
                 result["record_status"] = summary["forwarded_status"]
+                if args.command == "record":
+                    return {"status":"forwarded_record", "id":args.id, "chat":chat,
+                            "title":summary.get("title", ""),
+                            "parse_status":summary["forwarded_status"],
+                            "messages":summary.get("forwarded", []),
+                            "attachments":result,
+                            "note":"Text is read from the database; attachment availability is reported separately."}
                 return result
             if getattr(args, "item", None):
                 return {"status":"invalid_item", "reason":"item_selector_requires_forwarded_record"}
@@ -311,6 +338,9 @@ def main():
     media = sub.add_parser("media")
     media.add_argument("--id",required=True)
     media.add_argument("--item",help="Forwarded item ID from read, e.g. 2 or 1.3")
+    record = sub.add_parser("record", help="Read a bundled forwarded conversation and resolve local attachments together")
+    record.add_argument("--id", required=True)
+    record.add_argument("--item", help="Optional forwarded attachment item ID")
     ack = sub.add_parser("ack")
     ack.add_argument("--id",required=True,action="append")
     ack.add_argument("--result",required=True)

@@ -53,17 +53,17 @@ class ForwardedTests(unittest.TestCase):
         self.assertIn(result.get('forwarded_status'), ('rejected', 'unparsed'))
         self.assertNotIn('forwarded', result)
 
-    def _run_media(self, root, xml, selector=None, older_payload=False, duplicate=False):
+    def _run_media(self, root, xml, selector=None, older_payload=False, duplicate=False, conflicting=False, command="media"):
         row = {'local_id':29,'sort_seq':1791611342000,'create_time':1791611342,'local_type':49,'content':xml.encode(),'compress_content':None}
         class DB:
             account = 'wxid_fixture'
             account_dir = str(root / 'account')
             def get_message_rows_for_media(self, chat, local_id):
-                return [row, dict(row, sort_seq=1)] if duplicate else [row]
+                return [row, dict(row, content=b"different")] if conflicting else [row, dict(row, sort_seq=1)] if duplicate else [row]
             @staticmethod
             def _friendly_content(content, mtype):
                 return content.decode('utf8') if isinstance(content, bytes) else content
-        payload = {'account':DB.account,'local_id':29,'sort_seq':row['sort_seq'],'message':{'app_type':'19'} if older_payload else w.xml_summary(xml)}
+        payload = {'account':DB.account,'local_id':29,'sort_seq':row['sort_seq'],'time':row['create_time'],'message':{'app_type':'19'} if older_payload else w.xml_summary(xml)}
         old_private = w.PRIVATE
         w.PRIVATE = root / 'private'
         w.PRIVATE.mkdir(exist_ok=True)
@@ -71,7 +71,7 @@ class ForwardedTests(unittest.TestCase):
             with w.ledger() as con:
                 con.execute('INSERT INTO seen(id,chat,payload) VALUES(?,?,?)', ('message', 'group@chatroom', json.dumps(payload)))
             with patch.object(w,'open_db',return_value=(DB(),types.SimpleNamespace())):
-                return w.run(argparse.Namespace(command='media',id='message',item=selector))
+                return w.run(argparse.Namespace(command=command,id='message',item=selector))
         finally:
             w.PRIVATE = old_private
 
@@ -109,8 +109,13 @@ class ForwardedTests(unittest.TestCase):
     def test_shard_collision_does_not_recover_arbitrary_attachment(self):
         with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
             result=self._run_media(Path(td),card(record_xml([item(2,'<datadesc>[图片]</datadesc>')])),duplicate=True)
-            self.assertEqual(result['status'],'ambiguous')
+            self.assertEqual(result['status'],'forwarded')
+            self.assertEqual(result['summary']['local_missing'],1)
 
+    def test_exact_identity_content_conflict_is_rejected(self):
+        with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
+            result=self._run_media(Path(td),card(record_xml([item(2,'<datadesc>[图片]</datadesc>')])),conflicting=True)
+            self.assertEqual(result['status'],'ambiguous')
 
     def test_file_metadata_cannot_escape_private_directory(self):
         with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
@@ -293,6 +298,46 @@ class ForwardedTests(unittest.TestCase):
             (folder/'report(1).pptx').write_bytes(b'unknown report')
             xml='<msg><appmsg><type>6</type><title>report.pptx</title><appattach/></appmsg></msg>'
             self.assertEqual(self._run_media(root,xml)['status'],'local_missing')
+
+
+    def test_wrapped_recordinfo_is_parsed(self):
+        xml=card('<wrapper>'+record_xml([item(1,'<datadesc>Hello</datadesc>')])+'</wrapper>')
+        parsed=w.xml_summary(xml)
+        self.assertEqual(parsed['forwarded_status'],'parsed')
+        self.assertEqual(parsed['forwarded'][0]['datadesc'],'Hello')
+
+    def test_nested_direct_datalist_preserves_item_ids(self):
+        xml=card(record_xml([item(17,'<datalist>'+item(1,'<datadesc>Nested</datadesc>')+'</datalist>')]))
+        self.assertEqual(w.xml_summary(xml)['forwarded'][0]['forwarded'][0]['item_id'],'1.1')
+
+    def test_bundled_record_returns_text_and_verified_document_together(self):
+        with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
+            root=Path(td);folder=root/'account'/'cache'/'Rec';folder.mkdir(parents=True)
+            blob=b'local document content';digest=hashlib.md5(blob).hexdigest()
+            (folder/'opaque').write_bytes(blob)
+            xml=card(record_xml([item(1,'<datadesc>Please review</datadesc>'),item(8,'<datatitle>report.docx</datatitle><datafmt>docx</datafmt><fullmd5>'+digest+'</fullmd5><datasize>'+str(len(blob))+'</datasize>')]))
+            result=self._run_media(root,xml,command='record')
+            self.assertEqual(result['status'],'forwarded_record')
+            self.assertEqual(result['messages'][0]['datadesc'],'Please review')
+            a=result['attachments']['items'][0]
+            self.assertEqual(a['status'],'available')
+            self.assertEqual(Path(a['path']).read_bytes(),blob)
+            self.assertEqual(a['matched_by'],'md5')
+            self.assertEqual(Path(a['source_path']),folder/'opaque')
+
+    def test_file_named_dat_cannot_bypass_md5(self):
+        with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
+            root=Path(td);folder=root/'account'/'cache';folder.mkdir(parents=True)
+            (folder/('a'*32+'.dat')).write_bytes(b'wrong document')
+            xml=card(record_xml([item(8,'<datatitle>report.docx</datatitle><fullmd5>'+'b'*32+'</fullmd5>')]))
+            self.assertEqual(self._run_media(root,xml,selector='1')['status'],'local_missing')
+
+    def test_bundled_missing_file_keeps_readable_text(self):
+        with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as td:
+            xml=card(record_xml([item(1,'<datadesc>Readable text</datadesc>'),item(8,'<datatitle>missing.docx</datatitle>')]))
+            result=self._run_media(Path(td),xml,command='record')
+            self.assertEqual(result['messages'][0]['datadesc'],'Readable text')
+            self.assertEqual(result['attachments']['availability'],'local_missing')
 
 if __name__ == '__main__':
     unittest.main()

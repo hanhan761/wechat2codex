@@ -1,0 +1,142 @@
+{
+  "version": "4.2.0.13",
+  "sha256": "afe3d02c58bada3c35009c0cd58ee1f57b2a00fe53237d0dce649107fddb9a20",
+  "rvas": {
+    "text_ctor": "0x790db0",
+    "param_builder": "0xf910",
+    "dispatcher": "0x1a20280",
+    "invoker": "0x1a20a40",
+    "type_getter": "0x791330",
+    "subtype_getter": "0x791340",
+    "native_alloc": "0x76a750c",
+    "native_free": "0x76a7548",
+    "text_dtor": "0x7920e0",
+    "file_shared_ctor": "0x2cd1550",
+    "file_upload_task_ctor": "0x488ba10"
+  },
+  "layout": {
+    "receiver": 176,
+    "type": 280,
+    "subtype": 284,
+    "path_utf16": 288,
+    "file_name_utf8": 424,
+    "file_size": 456,
+    "msg_len": 456,
+    "uuid": 1784,
+    "content": 1880,
+    "atlist": 1912,
+    "text_wrapper_size": 1960,
+    "file_wrapper_size": 1896
+  },
+  "param1_vtable": "0x93f9a48",
+  "outer_vtable": "0x912f3b8",
+  "inner_vtable": "0x912f448",
+  "file_outer_vtable": "0x93c21c8",
+  "file_inner_vtable": "0x912f5d8",
+  "counter": "0xb48fff0",
+  "signatures": {
+    "text_ctor": {
+      "rva": 7933360,
+      "bytes": "5556574883ec50488d6c245048c745f8feffffff4889ce488d7dd84889f9e84d"
+    },
+    "param_builder": {
+      "rva": 63760,
+      "bytes": "554157415641545657534883ec40488d6c244048c745f8feffffff4c894de84c"
+    },
+    "dispatcher": {
+      "rva": 27394688,
+      "bytes": "5541565657534881ece0010000488dac248000000048c78558010000feffffff"
+    },
+    "invoker": {
+      "rva": 27396672,
+      "bytes": "5556574881ecd0000000488dac248000000048c74548feffffff4889ce48b8aa"
+    },
+    "type_getter": {
+      "rva": 7934768,
+      "bytes": "8b8118010000c3cccccccccccccccccc8b811c010000c3cccccccccccccccccc"
+    },
+    "subtype_getter": {
+      "rva": 7934784,
+      "bytes": "8b811c010000c3cccccccccccccccccc564883ec404889d64889ca488b059eec"
+    },
+    "native_alloc": {
+      "rva": 124417292,
+      "bytes": "40534883ec20488bd9eb0f488bcbe8e1cd180085c07413488bcbe899361a0048"
+    },
+    "native_free": {
+      "rva": 124417352,
+      "bytes": "e94b0d1a00cccccce9f3ffffffcccccc40534883ec20488d05eb479e01488bd9"
+    },
+    "text_dtor": {
+      "rva": 7938272,
+      "bytes": "564883ec204889ce488d0559d39908488901488b81900700004883f810723448"
+    },
+    "file_shared_ctor": {
+      "rva": 46994768,
+      "bytes": "555657534883ec58488d6c245048c74500feffffff4889ceb968070000e89a5f"
+    },
+    "file_upload_task_ctor": {
+      "rva": 76069392,
+      "bytes": "55415741565657534881ecc8000000488dac24800000000f29753048c74528fe"
+    }
+  },
+  "pointer_checks": [
+    {
+      "rva": 152236984,
+      "target": 44768
+    },
+    {
+      "rva": 152237136,
+      "target": 7934768
+    },
+    {
+      "rva": 155163224,
+      "target": 27394688
+    },
+    {
+      "rva": 155163448,
+      "target": 27396672
+    },
+    {
+      "rva": 154935752,
+      "target": 44768
+    },
+    {
+      "rva": 152237536,
+      "target": 7934768
+    },
+    {
+      "rva": 152237544,
+      "target": 7934784
+    }
+  ],
+  "helpers": {
+    "text": "wechat-send-4.2.0.13-5ebfa6a25827.dll",
+    "file": "wechat-file-send-4.2.0.13-d03dac45f236.dll"
+  },
+  "validation": {
+    "static_analysis": "complete",
+    "runtime_probe": "required",
+    "delivery": "single_private_chat_server_ack_observed"
+  },
+  "evidence": {
+    "text_ctor_normalized_match": 1,
+    "parameter_builder_normalized_match": 1,
+    "file_shared_ctor_normalized_match": 1,
+    "file_upload_task_ctor_normalized_match": 1,
+    "dispatcher_normalized_match": 0.9951,
+    "param_factory_normalized_match": 1,
+    "note": "Cross-checked native vtable slots, getters, destructors, allocation/free and shared-counter references. No send performed.",
+    "live_verification": {
+      "date": "2026-11-07",
+      "scope": "One human-reviewed text and one file to a private chat, each submitted once.",
+      "text": "Exact full body and nonzero server_id.",
+      "file": "Exact filename, size, uploaded MD5, attachment/CDN identifiers and nonzero final server_id.",
+      "receiver_download_hash_verified": false
+    }
+  },
+  "helper_sha256": {
+    "text": "5ebfa6a25827bd58c1cd08ec010c9c802a994aa3293842c230758fddee5c5f8b",
+    "file": "d03dac45f23614beed82309289bc497509647dd31aad8454a4a05c4a5ba6d3e0"
+  }
+}
